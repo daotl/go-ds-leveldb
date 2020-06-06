@@ -327,6 +327,11 @@ func (d *Datastore) NewTransaction(readOnly bool) (ds.Txn, error) {
 	if err != nil {
 		return nil, err
 	}
-	accessor := &accessor{ldb: tx, syncWrites: false, closeLk: d.closeLk}
+	accessor := &accessor{
+		ldb:        tx,
+		syncWrites: false,
+		ktype:      d.ktype,
+		closeLk:    d.closeLk,
+	}
 	return &transaction{accessor, tx}, nil
 }
