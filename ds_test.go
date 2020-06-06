@@ -1,3 +1,9 @@
+// Copyright for portions of this fork are held by [Jeromy Johnson, 2016] as
+// part of the original go-ds-leveldb project. All other copyright for
+// this fork are held by [The BDWare Authors, 2020]. All rights reserved.
+// Use of this source code is governed by MIT license that can be
+// found in the LICENSE file.
+
 package leveldb
 
 import (
@@ -8,9 +14,10 @@ import (
 	"sort"
 	"testing"
 
-	ds "github.com/ipfs/go-datastore"
-	dsq "github.com/ipfs/go-datastore/query"
-	dstest "github.com/ipfs/go-datastore/test"
+	ds "github.com/bdware/go-datastore"
+	key "github.com/bdware/go-datastore/key"
+	dsq "github.com/bdware/go-datastore/query"
+	dstest "github.com/bdware/go-datastore/test"
 )
 
 var testcases = map[string]string{
@@ -35,7 +42,7 @@ func newDS(t *testing.T) (*Datastore, func()) {
 		t.Fatal(err)
 	}
 
-	d, err := NewDatastore(path, nil)
+	d, err := NewDatastore(path, key.KeyTypeString, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +54,7 @@ func newDS(t *testing.T) (*Datastore, func()) {
 
 // newDSMem returns an in-memory datastore.
 func newDSMem(t *testing.T) *Datastore {
-	d, err := NewDatastore("", nil)
+	d, err := NewDatastore("", key.KeyTypeString, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,14 +63,14 @@ func newDSMem(t *testing.T) *Datastore {
 
 func addTestCases(t *testing.T, d *Datastore, testcases map[string]string) {
 	for k, v := range testcases {
-		dsk := ds.NewKey(k)
+		dsk := key.NewStrKey(k)
 		if err := d.Put(dsk, []byte(v)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	for k, v := range testcases {
-		dsk := ds.NewKey(k)
+		dsk := key.NewStrKey(k)
 		v2, err := d.Get(dsk)
 		if err != nil {
 			t.Fatal(err)
@@ -78,30 +85,30 @@ func addTestCases(t *testing.T, d *Datastore, testcases map[string]string) {
 func testQuery(t *testing.T, d *Datastore) {
 	addTestCases(t, d, testcases)
 
-	rs, err := d.Query(dsq.Query{Prefix: "/a/"})
+	rs, err := d.Query(dsq.Query{Prefix: key.QueryStrKey("/a/")})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectMatches(t, []string{
+	expectMatches(t, key.StrsToKeys([]string{
 		"/a/b",
 		"/a/b/c",
 		"/a/b/d",
 		"/a/c",
 		"/a/d",
-	}, rs)
+	}), rs)
 
 	// test offset and limit
 
-	rs, err = d.Query(dsq.Query{Prefix: "/a/", Offset: 2, Limit: 2})
+	rs, err = d.Query(dsq.Query{Prefix: key.QueryStrKey("/a/"), Offset: 2, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectMatches(t, []string{
+	expectMatches(t, key.StrsToKeys([]string{
 		"/a/b/d",
 		"/a/c",
-	}, rs)
+	}), rs)
 
 	// test order
 
@@ -116,7 +123,7 @@ func testQuery(t *testing.T, d *Datastore) {
 	}
 	sort.Strings(keys)
 
-	expectOrderedMatches(t, keys, rs)
+	expectOrderedMatches(t, key.StrsToKeys(keys), rs)
 
 	rs, err = d.Query(dsq.Query{Orders: []dsq.Order{dsq.OrderByKeyDescending{}}})
 	if err != nil {
@@ -128,7 +135,7 @@ func testQuery(t *testing.T, d *Datastore) {
 		keys[i], keys[j] = keys[j], keys[i]
 	}
 
-	expectOrderedMatches(t, keys, rs)
+	expectOrderedMatches(t, key.StrsToKeys(keys), rs)
 }
 
 func TestQuery(t *testing.T) {
@@ -150,11 +157,11 @@ func TestQueryRespectsProcess(t *testing.T) {
 func TestCloseRace(t *testing.T) {
 	d, close := newDS(t)
 	for n := 0; n < 100; n++ {
-		d.Put(ds.NewKey(fmt.Sprintf("%d", n)), []byte(fmt.Sprintf("test%d", n)))
+		d.Put(key.NewStrKey(fmt.Sprintf("%d", n)), []byte(fmt.Sprintf("test%d", n)))
 	}
 
 	tx, _ := d.NewTransaction(false)
-	tx.Put(ds.NewKey("txnversion"), []byte("bump"))
+	tx.Put(key.NewStrKey("txnversion"), []byte("bump"))
 
 	closeCh := make(chan interface{})
 
@@ -163,7 +170,7 @@ func TestCloseRace(t *testing.T) {
 		closeCh <- nil
 	}()
 	for k := range testcases {
-		tx.Get(ds.NewKey(k))
+		tx.Get(key.NewStrKey(k))
 	}
 	tx.Commit()
 	<-closeCh
@@ -174,7 +181,7 @@ func TestCloseSafety(t *testing.T) {
 	addTestCases(t, d, testcases)
 
 	tx, _ := d.NewTransaction(false)
-	err := tx.Put(ds.NewKey("test"), []byte("test"))
+	err := tx.Put(key.NewStrKey("test"), []byte("test"))
 	if err != nil {
 		t.Error("Failed to put in a txn.")
 	}
@@ -190,7 +197,7 @@ func TestQueryRespectsProcessMem(t *testing.T) {
 	addTestCases(t, d, testcases)
 }
 
-func expectMatches(t *testing.T, expect []string, actualR dsq.Results) {
+func expectMatches(t *testing.T, expect []key.Key, actualR dsq.Results) {
 	t.Helper()
 	actual, err := actualR.Rest()
 	if err != nil {
@@ -203,7 +210,7 @@ func expectMatches(t *testing.T, expect []string, actualR dsq.Results) {
 	for _, k := range expect {
 		found := false
 		for _, e := range actual {
-			if e.Key == k {
+			if e.Key.Equal(k) {
 				found = true
 			}
 		}
@@ -213,7 +220,7 @@ func expectMatches(t *testing.T, expect []string, actualR dsq.Results) {
 	}
 }
 
-func expectOrderedMatches(t *testing.T, expect []string, actualR dsq.Results) {
+func expectOrderedMatches(t *testing.T, expect []key.Key, actualR dsq.Results) {
 	t.Helper()
 	actual, err := actualR.Rest()
 	if err != nil {
@@ -224,7 +231,7 @@ func expectOrderedMatches(t *testing.T, expect []string, actualR dsq.Results) {
 		t.Error("not enough", expect, actual)
 	}
 	for i := range expect {
-		if expect[i] != actual[i].Key {
+		if !expect[i].Equal(actual[i].Key) {
 			t.Errorf("expected %q, got %q", expect[i], actual[i].Key)
 		}
 	}
@@ -237,7 +244,7 @@ func testBatching(t *testing.T, d *Datastore) {
 	}
 
 	for k, v := range testcases {
-		err := b.Put(ds.NewKey(k), []byte(v))
+		err := b.Put(key.NewStrKey(k), []byte(v))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -249,7 +256,7 @@ func testBatching(t *testing.T, d *Datastore) {
 	}
 
 	for k, v := range testcases {
-		val, err := d.Get(ds.NewKey(k))
+		val, err := d.Get(key.NewStrKey(k))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -283,7 +290,7 @@ func TestDiskUsage(t *testing.T) {
 		t.Fatal("expected some disk usage")
 	}
 
-	k := ds.NewKey("more")
+	k := key.NewStrKey("more")
 	err = d.Put(k, []byte("value"))
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +319,7 @@ func TestDiskUsageInMem(t *testing.T) {
 }
 
 func TestTransactionCommit(t *testing.T) {
-	key := ds.NewKey("/test/key1")
+	key := key.NewStrKey("/test/key1")
 
 	d, done := newDS(t)
 	defer done()
@@ -338,7 +345,7 @@ func TestTransactionCommit(t *testing.T) {
 }
 
 func TestTransactionDiscard(t *testing.T) {
-	key := ds.NewKey("/test/key1")
+	key := key.NewStrKey("/test/key1")
 
 	d, done := newDS(t)
 	defer done()
@@ -364,7 +371,7 @@ func TestTransactionDiscard(t *testing.T) {
 }
 
 func TestTransactionManyOperations(t *testing.T) {
-	keys := []ds.Key{ds.NewKey("/test/key1"), ds.NewKey("/test/key2"), ds.NewKey("/test/key3"), ds.NewKey("/test/key4"), ds.NewKey("/test/key5")}
+	keys := []key.Key{key.NewStrKey("/test/key1"), key.NewStrKey("/test/key2"), key.NewStrKey("/test/key3"), key.NewStrKey("/test/key4"), key.NewStrKey("/test/key5")}
 
 	d, done := newDS(t)
 	defer done()
@@ -396,7 +403,7 @@ func TestTransactionManyOperations(t *testing.T) {
 	}
 
 	var res dsq.Results
-	if res, err = txn.Query(dsq.Query{Prefix: "/test"}); err != nil {
+	if res, err = txn.Query(dsq.Query{Prefix: key.QueryStrKey("/test")}); err != nil {
 		t.Fatalf("query failed, err: %v", err)
 	}
 	if entries, err := res.Rest(); err != nil || len(entries) != 4 {

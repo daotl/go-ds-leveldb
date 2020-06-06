@@ -1,8 +1,8 @@
-module github.com/ipfs/go-ds-leveldb
+module github.com/bdware/go-ds-leveldb
+
+go 1.14
 
 require (
-	github.com/ipfs/go-datastore v0.4.1
+	github.com/bdware/go-datastore v0.4.5-alpha
 	github.com/syndtr/goleveldb v1.0.0
 )
-
-go 1.12

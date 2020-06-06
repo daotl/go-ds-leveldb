@@ -1,3 +1,9 @@
+// Copyright for portions of this fork are held by [Jeromy Johnson, 2016] as
+// part of the original go-ds-leveldb project. All other copyright for
+// this fork are held by [The BDWare Authors, 2020]. All rights reserved.
+// Use of this source code is governed by MIT license that can be
+// found in the LICENSE file.
+
 package leveldb
 
 import (
@@ -5,8 +11,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	ds "github.com/ipfs/go-datastore"
-	dsq "github.com/ipfs/go-datastore/query"
+	ds "github.com/bdware/go-datastore"
+	key "github.com/bdware/go-datastore/key"
+	dsq "github.com/bdware/go-datastore/query"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -14,6 +21,8 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
+
+var ErrKeyTypeNotMatch = errors.New("key type does not match")
 
 type Datastore struct {
 	*accessor
@@ -31,7 +40,7 @@ type Options opt.Options
 // NewDatastore returns a new datastore backed by leveldb
 //
 // for path == "", an in memory bachend will be chosen
-func NewDatastore(path string, opts *Options) (*Datastore, error) {
+func NewDatastore(path string, ktype key.KeyType, opts *Options) (*Datastore, error) {
 	var nopts opt.Options
 	if opts != nil {
 		nopts = opt.Options(*opts)
@@ -39,6 +48,10 @@ func NewDatastore(path string, opts *Options) (*Datastore, error) {
 
 	var err error
 	var db *leveldb.DB
+
+	if !(ktype == key.KeyTypeString || ktype == key.KeyTypeBytes) {
+		return nil, key.ErrKeyTypeNotSupported
+	}
 
 	if path == "" {
 		db, err = leveldb.Open(storage.NewMemStorage(), &nopts)
@@ -54,9 +67,14 @@ func NewDatastore(path string, opts *Options) (*Datastore, error) {
 	}
 
 	ds := Datastore{
-		accessor: &accessor{ldb: db, syncWrites: true, closeLk: new(sync.RWMutex)},
-		DB:       db,
-		path:     path,
+		accessor: &accessor{
+			ldb:        db,
+			syncWrites: true,
+			ktype:      ktype,
+			closeLk:    new(sync.RWMutex),
+		},
+		DB:   db,
+		path: path,
 	}
 	return &ds, nil
 }
@@ -76,20 +94,30 @@ type levelDbOps interface {
 type accessor struct {
 	ldb        levelDbOps
 	syncWrites bool
+	ktype      key.KeyType
 	closeLk    *sync.RWMutex
 }
 
-func (a *accessor) Put(key ds.Key, value []byte) (err error) {
+func (a *accessor) Put(key key.Key, value []byte) (err error) {
+	if key.KeyType() != a.ktype {
+		return ErrKeyTypeNotMatch
+	}
 	a.closeLk.RLock()
 	defer a.closeLk.RUnlock()
 	return a.ldb.Put(key.Bytes(), value, &opt.WriteOptions{Sync: a.syncWrites})
 }
 
-func (a *accessor) Sync(prefix ds.Key) error {
+func (a *accessor) Sync(prefix key.Key) error {
+	if prefix.KeyType() != a.ktype {
+		return ErrKeyTypeNotMatch
+	}
 	return nil
 }
 
-func (a *accessor) Get(key ds.Key) (value []byte, err error) {
+func (a *accessor) Get(key key.Key) (value []byte, err error) {
+	if key.KeyType() != a.ktype {
+		return nil, ErrKeyTypeNotMatch
+	}
 	a.closeLk.RLock()
 	defer a.closeLk.RUnlock()
 	val, err := a.ldb.Get(key.Bytes(), nil)
@@ -102,17 +130,26 @@ func (a *accessor) Get(key ds.Key) (value []byte, err error) {
 	return val, nil
 }
 
-func (a *accessor) Has(key ds.Key) (exists bool, err error) {
+func (a *accessor) Has(key key.Key) (exists bool, err error) {
+	if key.KeyType() != a.ktype {
+		return false, ErrKeyTypeNotMatch
+	}
 	a.closeLk.RLock()
 	defer a.closeLk.RUnlock()
 	return a.ldb.Has(key.Bytes(), nil)
 }
 
-func (a *accessor) GetSize(key ds.Key) (size int, err error) {
+func (a *accessor) GetSize(key key.Key) (size int, err error) {
+	if key.KeyType() != a.ktype {
+		return -1, ErrKeyTypeNotMatch
+	}
 	return ds.GetBackedSize(a, key)
 }
 
-func (a *accessor) Delete(key ds.Key) (err error) {
+func (a *accessor) Delete(key key.Key) (err error) {
+	if key.KeyType() != a.ktype {
+		return ErrKeyTypeNotMatch
+	}
 	a.closeLk.RLock()
 	defer a.closeLk.RUnlock()
 	return a.ldb.Delete(key.Bytes(), &opt.WriteOptions{Sync: a.syncWrites})
@@ -126,11 +163,24 @@ func (a *accessor) Query(q dsq.Query) (dsq.Results, error) {
 	// make a copy of the query for the fallback naive query implementation.
 	// don't modify the original so res.Query() returns the correct results.
 	qNaive := q
-	prefix := ds.NewKey(q.Prefix).String()
-	if prefix != "/" {
-		rnge = util.BytesPrefix([]byte(prefix + "/"))
-		qNaive.Prefix = ""
+	if q.Prefix != nil {
+		if q.Prefix.KeyType() != a.ktype {
+			return nil, ErrKeyTypeNotMatch
+		}
+		switch a.ktype {
+		case key.KeyTypeString:
+			sk := q.Prefix.(key.StrKey)
+			sk.Clean()
+			prefix := sk.String()
+			if prefix != "/" {
+				rnge = util.BytesPrefix([]byte(prefix + "/"))
+			}
+		case key.KeyTypeBytes:
+			rnge = util.BytesPrefix(q.Prefix.Bytes())
+		}
+		qNaive.Prefix = nil
 	}
+
 	i := a.ldb.NewIterator(rnge, nil)
 	next := i.Next
 	if len(q.Orders) > 0 {
@@ -153,7 +203,13 @@ func (a *accessor) Query(q dsq.Query) (dsq.Results, error) {
 			if !next() {
 				return dsq.Result{}, false
 			}
-			k := string(i.Key())
+			var k key.Key
+			switch a.ktype {
+			case key.KeyTypeString:
+				k = key.NewStrKey(string(i.Key()))
+			case key.KeyTypeBytes:
+				k = key.NewBytesKey(i.Key())
+			}
 			e := dsq.Entry{Key: k, Size: len(i.Value())}
 
 			if !q.KeysOnly {
@@ -211,6 +267,7 @@ type leveldbBatch struct {
 	db         *leveldb.DB
 	closeLk    *sync.RWMutex
 	syncWrites bool
+	ktype      key.KeyType
 }
 
 func (d *Datastore) Batch() (ds.Batch, error) {
@@ -219,10 +276,14 @@ func (d *Datastore) Batch() (ds.Batch, error) {
 		db:         d.DB,
 		closeLk:    d.closeLk,
 		syncWrites: d.syncWrites,
+		ktype:      d.ktype,
 	}, nil
 }
 
-func (b *leveldbBatch) Put(key ds.Key, value []byte) error {
+func (b *leveldbBatch) Put(key key.Key, value []byte) error {
+	if key.KeyType() != b.ktype {
+		return ErrKeyTypeNotMatch
+	}
 	b.b.Put(key.Bytes(), value)
 	return nil
 }
@@ -233,7 +294,10 @@ func (b *leveldbBatch) Commit() error {
 	return b.db.Write(b.b, &opt.WriteOptions{Sync: b.syncWrites})
 }
 
-func (b *leveldbBatch) Delete(key ds.Key) error {
+func (b *leveldbBatch) Delete(key key.Key) error {
+	if key.KeyType() != b.ktype {
+		return ErrKeyTypeNotMatch
+	}
 	b.b.Delete(key.Bytes())
 	return nil
 }
