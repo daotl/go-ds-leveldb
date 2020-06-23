@@ -22,7 +22,10 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-var ErrKeyTypeNotMatch = errors.New("key type does not match")
+var (
+	ErrUnimplemented   = errors.New("method not implemented")
+	ErrKeyTypeNotMatch = errors.New("key type does not match")
+)
 
 type Datastore struct {
 	*accessor
@@ -33,18 +36,34 @@ type Datastore struct {
 var _ ds.Datastore = (*Datastore)(nil)
 var _ ds.TxnDatastore = (*Datastore)(nil)
 
-// Options is an alias of syndtr/goleveldb/opt.Options which might be extended
-// in the future.
-type Options opt.Options
+// Options extends syndtr/goleveldb/opt.Options
+type Options struct {
+	opt.Options
+
+	// SyncWrites is whether to sync underlying writes from the OS buffer cache
+	// through to actual disk, if applicable. Setting SyncWrites can result in
+	// slower writes.
+	//
+	// If false, and the machine crashes, then some recent writes may be lost.
+	// Note that if it is just the process that crashes (and the machine does
+	// not) then no writes will be lost.
+	//
+	// In other words, SyncWrites being false has the same semantics as a write
+	// system call. SyncWrites being true means write followed by fsync.
+	//
+	// The default value is true.
+	SyncWrites bool
+}
 
 // NewDatastore returns a new datastore backed by leveldb
 //
 // for path == "", an in memory bachend will be chosen
 func NewDatastore(path string, ktype key.KeyType, opts *Options) (*Datastore, error) {
-	var nopts opt.Options
-	if opts != nil {
-		nopts = opt.Options(*opts)
+	if opts == nil {
+		opts = &Options{SyncWrites: true}
 	}
+
+	nopts := opts.Options
 
 	var err error
 	var db *leveldb.DB
@@ -69,7 +88,7 @@ func NewDatastore(path string, ktype key.KeyType, opts *Options) (*Datastore, er
 	ds := Datastore{
 		accessor: &accessor{
 			ldb:        db,
-			syncWrites: true,
+			syncWrites: opts.SyncWrites,
 			ktype:      ktype,
 			closeLk:    new(sync.RWMutex),
 		},
@@ -108,6 +127,10 @@ func (a *accessor) Put(key key.Key, value []byte) (err error) {
 }
 
 func (a *accessor) Sync(prefix key.Key) error {
+	// goleveldb provides no way to fsync if written with WriteOptions.Sync=false
+	if a.syncWrites == false {
+		return ErrUnimplemented
+	}
 	if prefix.KeyType() != a.ktype {
 		return ErrKeyTypeNotMatch
 	}
