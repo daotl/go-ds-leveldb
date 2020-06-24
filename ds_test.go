@@ -20,7 +20,7 @@ import (
 	dstest "github.com/bdware/go-datastore/test"
 )
 
-var testcases = map[string]string{
+var testcasesStrKey = map[string]string{
 	"/a":     "a",
 	"/a/b":   "ab",
 	"/a/b/c": "abc",
@@ -31,18 +31,29 @@ var testcases = map[string]string{
 	"/f":     "f",
 }
 
+var testcasesBytesKey = map[string]string{
+	"a":   "a",
+	"ab":  "ab",
+	"abc": "abc",
+	"abd": "abd",
+	"ac":  "ac",
+	"ad":  "ad",
+	"e":   "e",
+	"f":   "f",
+}
+
 // returns datastore, and a function to call on exit.
 // (this garbage collects). So:
 //
 //  d, close := newDS(t)
 //  defer close()
-func newDS(t *testing.T) (*Datastore, func()) {
+func newDS(t *testing.T, ktype key.KeyType) (*Datastore, func()) {
 	path, err := ioutil.TempDir("", "testing_leveldb_")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	d, err := NewDatastore(path, key.KeyTypeString, nil)
+	d, err := NewDatastore(path, ktype, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,15 +64,15 @@ func newDS(t *testing.T) (*Datastore, func()) {
 }
 
 // newDSMem returns an in-memory datastore.
-func newDSMem(t *testing.T) *Datastore {
-	d, err := NewDatastore("", key.KeyTypeString, nil)
+func newDSMem(t *testing.T, ktype key.KeyType) *Datastore {
+	d, err := NewDatastore("", ktype, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return d
 }
 
-func addTestCases(t *testing.T, d *Datastore, testcases map[string]string) {
+func addStrKeyTestCases(t *testing.T, d *Datastore, testcases map[string]string) {
 	for k, v := range testcases {
 		dsk := key.NewStrKey(k)
 		if err := d.Put(dsk, []byte(v)); err != nil {
@@ -79,11 +90,32 @@ func addTestCases(t *testing.T, d *Datastore, testcases map[string]string) {
 			t.Errorf("%s values differ: %s != %s", k, v, v2)
 		}
 	}
-
 }
 
-func testQuery(t *testing.T, d *Datastore) {
-	addTestCases(t, d, testcases)
+func addBytesKeyTestCases(t *testing.T, d *Datastore, testcases map[string]string) {
+	for k, v := range testcases {
+		dsk := key.NewBytesKeyFromString(k)
+		if err := d.Put(dsk, []byte(v)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for k, v := range testcases {
+		dsk := key.NewBytesKeyFromString(k)
+		v2, err := d.Get(dsk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(v2) != v {
+			t.Errorf("%s values differ: %s != %s", k, v, v2)
+		}
+	}
+}
+
+func testStrKeyQuery(t *testing.T, d *Datastore) {
+	addStrKeyTestCases(t, d, testcasesStrKey)
+
+	// test prefix
 
 	rs, err := d.Query(dsq.Query{Prefix: key.QueryStrKey("/a/")})
 	if err != nil {
@@ -96,6 +128,50 @@ func testQuery(t *testing.T, d *Datastore) {
 		"/a/b/d",
 		"/a/c",
 		"/a/d",
+	}), rs)
+
+	// test range
+
+	rs, err = d.Query(dsq.Query{Range: dsq.Range{key.QueryStrKey("/a/b"), key.QueryStrKey("/a/d")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectMatches(t, key.StrsToKeys([]string{
+		"/a/b",
+		"/a/b/c",
+		"/a/b/d",
+		"/a/c",
+	}), rs)
+
+	// test prefix & range
+
+	rs, err = d.Query(dsq.Query{
+		Prefix: key.QueryStrKey("/a/"),
+		Range:  dsq.Range{key.QueryStrKey("/a/b"), key.QueryStrKey("/a/d")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectMatches(t, key.StrsToKeys([]string{
+		"/a/b",
+		"/a/b/c",
+		"/a/b/d",
+		"/a/c",
+	}), rs)
+
+	rs, err = d.Query(dsq.Query{
+		Prefix: key.QueryStrKey("/a/b/"),
+		Range:  dsq.Range{key.QueryStrKey("/a/b"), key.QueryStrKey("/a/d")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectMatches(t, key.StrsToKeys([]string{
+		"/a/b/c",
+		"/a/b/d",
 	}), rs)
 
 	// test offset and limit
@@ -117,8 +193,8 @@ func testQuery(t *testing.T, d *Datastore) {
 		t.Fatal(err)
 	}
 
-	keys := make([]string, 0, len(testcases))
-	for k := range testcases {
+	keys := make([]string, 0, len(testcasesStrKey))
+	for k := range testcasesStrKey {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -138,24 +214,136 @@ func testQuery(t *testing.T, d *Datastore) {
 	expectOrderedMatches(t, key.StrsToKeys(keys), rs)
 }
 
-func TestQuery(t *testing.T) {
-	d, close := newDS(t)
-	defer close()
-	testQuery(t, d)
+func testBytesKeyQuery(t *testing.T, d *Datastore) {
+	addBytesKeyTestCases(t, d, testcasesBytesKey)
+
+	// test prefix
+
+	rs, err := d.Query(dsq.Query{Prefix: key.NewBytesKeyFromString("a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectMatches(t, key.StrsToBytesKeys([]string{
+		"ab",
+		"abc",
+		"abd",
+		"ac",
+		"ad",
+	}), rs)
+
+	// test range
+
+	rs, err = d.Query(dsq.Query{Range: dsq.Range{key.NewBytesKeyFromString("ab"), key.NewBytesKeyFromString("ad")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectMatches(t, key.StrsToBytesKeys([]string{
+		"ab",
+		"abc",
+		"abd",
+		"ac",
+	}), rs)
+
+	// test prefix & range
+
+	rs, err = d.Query(dsq.Query{
+		Prefix: key.NewBytesKeyFromString("a"),
+		Range:  dsq.Range{key.NewBytesKeyFromString("ab"), key.NewBytesKeyFromString("ad")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectMatches(t, key.StrsToBytesKeys([]string{
+		"ab",
+		"abc",
+		"abd",
+		"ac",
+	}), rs)
+
+	rs, err = d.Query(dsq.Query{
+		Prefix: key.NewBytesKeyFromString("ab"),
+		Range:  dsq.Range{key.NewBytesKeyFromString("ab"), key.NewBytesKeyFromString("ad")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectMatches(t, key.StrsToBytesKeys([]string{
+		"abc",
+		"abd",
+	}), rs)
+
+	// test offset and limit
+
+	rs, err = d.Query(dsq.Query{Prefix: key.NewBytesKeyFromString("a"), Offset: 2, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectMatches(t, key.StrsToBytesKeys([]string{
+		"abd",
+		"ac",
+	}), rs)
+
+	// test order
+
+	rs, err = d.Query(dsq.Query{Orders: []dsq.Order{dsq.OrderByKey{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keys := make([]string, 0, len(testcasesBytesKey))
+	for k := range testcasesBytesKey {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	expectOrderedMatches(t, key.StrsToBytesKeys(keys), rs)
+
+	rs, err = d.Query(dsq.Query{Orders: []dsq.Order{dsq.OrderByKeyDescending{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// reverse
+	for i, j := 0, len(keys)-1; i < j; i, j = i+1, j-1 {
+		keys[i], keys[j] = keys[j], keys[i]
+	}
+
+	expectOrderedMatches(t, key.StrsToBytesKeys(keys), rs)
 }
-func TestQueryMem(t *testing.T) {
-	d := newDSMem(t)
-	testQuery(t, d)
+
+func TestStrKeyQuery(t *testing.T) {
+	d, close := newDS(t, key.KeyTypeString)
+	defer close()
+	testStrKeyQuery(t, d)
+}
+func TestStrKeyQueryMem(t *testing.T) {
+	d := newDSMem(t, key.KeyTypeString)
+	testStrKeyQuery(t, d)
+}
+
+func TestBytesKeyQuery(t *testing.T) {
+	d, close := newDS(t, key.KeyTypeBytes)
+	defer close()
+	testBytesKeyQuery(t, d)
+}
+func TestBytesKeyQueryMem(t *testing.T) {
+	d := newDSMem(t, key.KeyTypeBytes)
+	testBytesKeyQuery(t, d)
 }
 
 func TestQueryRespectsProcess(t *testing.T) {
-	d, close := newDS(t)
+	d, close := newDS(t, key.KeyTypeString)
 	defer close()
-	addTestCases(t, d, testcases)
+	addStrKeyTestCases(t, d, testcasesStrKey)
 }
 
 func TestCloseRace(t *testing.T) {
-	d, close := newDS(t)
+	d, close := newDS(t, key.KeyTypeString)
 	for n := 0; n < 100; n++ {
 		d.Put(key.NewStrKey(fmt.Sprintf("%d", n)), []byte(fmt.Sprintf("test%d", n)))
 	}
@@ -169,7 +357,7 @@ func TestCloseRace(t *testing.T) {
 		close()
 		closeCh <- nil
 	}()
-	for k := range testcases {
+	for k := range testcasesStrKey {
 		tx.Get(key.NewStrKey(k))
 	}
 	tx.Commit()
@@ -177,8 +365,8 @@ func TestCloseRace(t *testing.T) {
 }
 
 func TestCloseSafety(t *testing.T) {
-	d, close := newDS(t)
-	addTestCases(t, d, testcases)
+	d, close := newDS(t, key.KeyTypeString)
+	addStrKeyTestCases(t, d, testcasesStrKey)
 
 	tx, _ := d.NewTransaction(false)
 	err := tx.Put(key.NewStrKey("test"), []byte("test"))
@@ -193,8 +381,8 @@ func TestCloseSafety(t *testing.T) {
 }
 
 func TestQueryRespectsProcessMem(t *testing.T) {
-	d := newDSMem(t)
-	addTestCases(t, d, testcases)
+	d := newDSMem(t, key.KeyTypeString)
+	addStrKeyTestCases(t, d, testcasesStrKey)
 }
 
 func expectMatches(t *testing.T, expect []key.Key, actualR dsq.Results) {
@@ -243,7 +431,7 @@ func testBatching(t *testing.T, d *Datastore) {
 		t.Fatal(err)
 	}
 
-	for k, v := range testcases {
+	for k, v := range testcasesStrKey {
 		err := b.Put(key.NewStrKey(k), []byte(v))
 		if err != nil {
 			t.Fatal(err)
@@ -255,7 +443,7 @@ func testBatching(t *testing.T, d *Datastore) {
 		t.Fatal(err)
 	}
 
-	for k, v := range testcases {
+	for k, v := range testcasesStrKey {
 		val, err := d.Get(key.NewStrKey(k))
 		if err != nil {
 			t.Fatal(err)
@@ -268,19 +456,19 @@ func testBatching(t *testing.T, d *Datastore) {
 }
 
 func TestBatching(t *testing.T) {
-	d, done := newDS(t)
+	d, done := newDS(t, key.KeyTypeString)
 	defer done()
 	testBatching(t, d)
 }
 
 func TestBatchingMem(t *testing.T) {
-	d := newDSMem(t)
+	d := newDSMem(t, key.KeyTypeString)
 	testBatching(t, d)
 }
 
 func TestDiskUsage(t *testing.T) {
-	d, done := newDS(t)
-	addTestCases(t, d, testcases)
+	d, done := newDS(t, key.KeyTypeString)
+	addStrKeyTestCases(t, d, testcasesStrKey)
 	du, err := d.DiskUsage()
 	if err != nil {
 		t.Fatal(err)
@@ -311,7 +499,7 @@ func TestDiskUsage(t *testing.T) {
 }
 
 func TestDiskUsageInMem(t *testing.T) {
-	d := newDSMem(t)
+	d := newDSMem(t, key.KeyTypeString)
 	du, _ := d.DiskUsage()
 	if du != 0 {
 		t.Fatal("inmem dbs have 0 disk usage")
@@ -319,9 +507,9 @@ func TestDiskUsageInMem(t *testing.T) {
 }
 
 func TestTransactionCommit(t *testing.T) {
-	key := key.NewStrKey("/test/key1")
+	k := key.NewStrKey("/test/key1")
 
-	d, done := newDS(t)
+	d, done := newDS(t, key.KeyTypeString)
 	defer done()
 
 	txn, err := d.NewTransaction(false)
@@ -330,24 +518,24 @@ func TestTransactionCommit(t *testing.T) {
 	}
 	defer txn.Discard()
 
-	if err := txn.Put(key, []byte("hello")); err != nil {
+	if err := txn.Put(k, []byte("hello")); err != nil {
 		t.Fatal(err)
 	}
-	if val, err := d.Get(key); err != ds.ErrNotFound {
+	if val, err := d.Get(k); err != ds.ErrNotFound {
 		t.Fatalf("expected ErrNotFound, got err: %v, value: %v", err, val)
 	}
 	if err := txn.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if val, err := d.Get(key); err != nil || !bytes.Equal(val, []byte("hello")) {
+	if val, err := d.Get(k); err != nil || !bytes.Equal(val, []byte("hello")) {
 		t.Fatalf("expected entry present after commit, got err: %v, value: %v", err, val)
 	}
 }
 
 func TestTransactionDiscard(t *testing.T) {
-	key := key.NewStrKey("/test/key1")
+	k := key.NewStrKey("/test/key1")
 
-	d, done := newDS(t)
+	d, done := newDS(t, key.KeyTypeString)
 	defer done()
 
 	txn, err := d.NewTransaction(false)
@@ -356,16 +544,16 @@ func TestTransactionDiscard(t *testing.T) {
 	}
 	defer txn.Discard()
 
-	if err := txn.Put(key, []byte("hello")); err != nil {
+	if err := txn.Put(k, []byte("hello")); err != nil {
 		t.Fatal(err)
 	}
-	if val, err := d.Get(key); err != ds.ErrNotFound {
+	if val, err := d.Get(k); err != ds.ErrNotFound {
 		t.Fatalf("expected ErrNotFound, got err: %v, value: %v", err, val)
 	}
 	if txn.Discard(); err != nil {
 		t.Fatal(err)
 	}
-	if val, err := d.Get(key); err != ds.ErrNotFound {
+	if val, err := d.Get(k); err != ds.ErrNotFound {
 		t.Fatalf("expected ErrNotFound, got err: %v, value: %v", err, val)
 	}
 }
@@ -373,7 +561,7 @@ func TestTransactionDiscard(t *testing.T) {
 func TestTransactionManyOperations(t *testing.T) {
 	keys := []key.Key{key.NewStrKey("/test/key1"), key.NewStrKey("/test/key2"), key.NewStrKey("/test/key3"), key.NewStrKey("/test/key4"), key.NewStrKey("/test/key5")}
 
-	d, done := newDS(t)
+	d, done := newDS(t, key.KeyTypeString)
 	defer done()
 
 	txn, err := d.NewTransaction(false)
@@ -414,7 +602,7 @@ func TestTransactionManyOperations(t *testing.T) {
 }
 
 func TestSuite(t *testing.T) {
-	d := newDSMem(t)
+	d := newDSMem(t, key.KeyTypeString)
 	defer d.Close()
 	dstest.SubtestAll(t, d)
 }

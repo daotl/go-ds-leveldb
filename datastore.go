@@ -7,6 +7,7 @@
 package leveldb
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sync"
@@ -181,11 +182,14 @@ func (a *accessor) Delete(key key.Key) (err error) {
 func (a *accessor) Query(q dsq.Query) (dsq.Results, error) {
 	a.closeLk.RLock()
 	defer a.closeLk.RUnlock()
-	var rnge *util.Range
 
 	// make a copy of the query for the fallback naive query implementation.
 	// don't modify the original so res.Query() returns the correct results.
 	qNaive := q
+
+	// We compute the intersection of the ranges defined by q.Prefix and q.Range.
+	var rnge *util.Range
+	// First q.Prefix
 	if q.Prefix != nil {
 		if q.Prefix.KeyType() != a.ktype {
 			return nil, ErrKeyTypeNotMatch
@@ -200,8 +204,25 @@ func (a *accessor) Query(q dsq.Query) (dsq.Results, error) {
 			}
 		case key.KeyTypeBytes:
 			rnge = util.BytesPrefix(q.Prefix.Bytes())
+			rnge.Start = append(rnge.Start, 0x0)
 		}
 		qNaive.Prefix = nil
+	}
+	// Then adjust with q.Range
+	if q.Range.Start != nil || q.Range.End != nil {
+		if rnge == nil {
+			rnge = &util.Range{}
+		}
+		if q.Range.Start != nil {
+			if sbytes := q.Range.Start.Bytes(); rnge.Start == nil || bytes.Compare(rnge.Start, sbytes) < 0 {
+				rnge.Start = sbytes
+			}
+		}
+		if q.Range.End != nil {
+			if ebytes := q.Range.End.Bytes(); rnge.Limit == nil || bytes.Compare(ebytes, rnge.Limit) < 0 {
+				rnge.Limit = ebytes
+			}
+		}
 	}
 
 	i := a.ldb.NewIterator(rnge, nil)
@@ -231,7 +252,9 @@ func (a *accessor) Query(q dsq.Query) (dsq.Results, error) {
 			case key.KeyTypeString:
 				k = key.NewStrKey(string(i.Key()))
 			case key.KeyTypeBytes:
-				k = key.NewBytesKey(i.Key())
+				b := make([]byte, len(i.Key()))
+				copy(b, i.Key())
+				k = key.NewBytesKey(b)
 			}
 			e := dsq.Entry{Key: k, Size: len(i.Value())}
 
