@@ -1,16 +1,20 @@
 # go-ds-leveldb
 
-Fork of [ipfs/go-ds-leveldb](https://github.com/ipfs/go-ds-leveldb) used by BDWare projects.
+DAOT Labs's fork of [ipfs/go-ds-leveldb](https://github.com/ipfs/go-ds-leveldb).
 
 [![](https://img.shields.io/badge/made%20by-Protocol%20Labs-blue.svg?style=flat-square)](http://ipn.io)
-[![](https://img.shields.io/badge/project-BDWare-red.svg?style=flat-square)](http://bdware.org/)
+[![](https://img.shields.io/badge/project-DAOT%20Labs-red.svg?style=flat-square)](http://github.com/daotl)
 [![standard-readme compliant](https://img.shields.io/badge/standard--readme-OK-green.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
-[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/bdware/go-ds-leveldb)
-[![Build Status](https://travis-ci.org/BDWare/go-ds-leveldb.svg?branch=master)](https://travis-ci.org/BDWare/go-ds-leveldb)
+[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/daotl/go-ds-leveldb)
+[![Build Status](https://travis-ci.org/daotl/go-ds-leveldb.svg?branch=master)](https://travis-ci.org/daotl/go-ds-leveldb)
 
 > A go-datastore implementation using LevelDB
 
-`go-ds-leveldb` implements the [go-datastore](https://github.com/BDWare/go-datastore) interface using a LevelDB backend.
+`go-ds-leveldb` implements the [go-datastore](https://github.com/daotl/go-datastore) interface using a LevelDB backend.
+
+This fork adds support for bytes-backed keys in addition to original string-backed
+keys, which could improve performance in some cases by preventing type conversion
+and reducing key size.
 
 ## Lead Maintainer
 
@@ -28,16 +32,16 @@ Fork of [ipfs/go-ds-leveldb](https://github.com/ipfs/go-ds-leveldb) used by BDWa
 This module can be installed like a regular go module:
 
 ```
-go get github.com/bdware/go-ds-leveldb
+go get github.com/daotl/go-ds-leveldb
 ```
 
 ## Usage
 
 ```
-import "github.com/bdware/go-ds-leveldb"
+import "github.com/daotl/go-ds-leveldb"
 ```
 
-Check the [API documentation](https://pkg.go.dev/github.com/bdware/go-ds-leveldb)
+Check the [API documentation](https://pkg.go.dev/github.com/daotl/go-ds-leveldb)
 
 ## Contribute
 
@@ -51,6 +55,6 @@ Small note: If editing the README, please conform to the [standard-readme](https
 
 Copyright for portions of this fork are held by [Protocol Labs, 2016] as part of the original [go-ds-leveldb](https://github.com/ipfs/go-ds-leveldb) project.
 
-All other copyright for this fork are held by [The BDWare Authors, 2020].
+All other copyright for this fork are held by [DAOT Labs, 2020].
 
 All rights reserved.
