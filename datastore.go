@@ -57,7 +57,7 @@ type Options struct {
 
 // NewDatastore returns a new datastore backed by leveldb
 //
-// for path == "", an in memory bachend will be chosen
+// for path == "", an in memory backend will be chosen
 func NewDatastore(path string, ktype key.KeyType, opts *Options) (*Datastore, error) {
 	if opts == nil {
 		opts = &Options{SyncWrites: true}
