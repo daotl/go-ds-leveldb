@@ -1,6 +1,6 @@
 module github.com/daotl/go-ds-leveldb
 
-go 1.12
+go 1.15
 
 require (
 	github.com/daotl/go-datastore v0.4.7

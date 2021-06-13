@@ -46,8 +46,12 @@ func newDS(t *testing.T, ktype key.KeyType) (*Datastore, func()) {
 		t.Fatal(err)
 	}
 	return d, func() {
-		os.RemoveAll(path)
-		d.Close()
+		if err := d.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -372,6 +376,9 @@ func TestDiskUsage(t *testing.T) {
 	}
 
 	du2, err := d.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if du2 <= du {
 		t.Fatal("size should have increased")
 	}
