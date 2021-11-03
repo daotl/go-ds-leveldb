@@ -7,6 +7,7 @@ package leveldb
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -117,7 +118,7 @@ type accessor struct {
 	closeLk    *sync.RWMutex
 }
 
-func (a *accessor) Put(key key.Key, value []byte) (err error) {
+func (a *accessor) Put(ctx context.Context, key key.Key, value []byte) (err error) {
 	if key.KeyType() != a.ktype {
 		return ErrKeyTypeNotMatch
 	}
@@ -126,7 +127,7 @@ func (a *accessor) Put(key key.Key, value []byte) (err error) {
 	return a.ldb.Put(key.Bytes(), value, &opt.WriteOptions{Sync: a.syncWrites})
 }
 
-func (a *accessor) Sync(prefix key.Key) error {
+func (a *accessor) Sync(ctx context.Context, prefix key.Key) error {
 	// goleveldb provides no way to fsync if written with WriteOptions.Sync=false
 	if a.syncWrites == false {
 		return ErrUnimplemented
@@ -137,7 +138,7 @@ func (a *accessor) Sync(prefix key.Key) error {
 	return nil
 }
 
-func (a *accessor) Get(key key.Key) (value []byte, err error) {
+func (a *accessor) Get(ctx context.Context, key key.Key) (value []byte, err error) {
 	if key.KeyType() != a.ktype {
 		return nil, ErrKeyTypeNotMatch
 	}
@@ -153,7 +154,7 @@ func (a *accessor) Get(key key.Key) (value []byte, err error) {
 	return val, nil
 }
 
-func (a *accessor) Has(key key.Key) (exists bool, err error) {
+func (a *accessor) Has(ctx context.Context, key key.Key) (exists bool, err error) {
 	if key.KeyType() != a.ktype {
 		return false, ErrKeyTypeNotMatch
 	}
@@ -162,14 +163,14 @@ func (a *accessor) Has(key key.Key) (exists bool, err error) {
 	return a.ldb.Has(key.Bytes(), nil)
 }
 
-func (a *accessor) GetSize(key key.Key) (size int, err error) {
+func (a *accessor) GetSize(ctx context.Context, key key.Key) (size int, err error) {
 	if key.KeyType() != a.ktype {
 		return -1, ErrKeyTypeNotMatch
 	}
-	return ds.GetBackedSize(a, key)
+	return ds.GetBackedSize(ctx, a, key)
 }
 
-func (a *accessor) Delete(key key.Key) (err error) {
+func (a *accessor) Delete(ctx context.Context, key key.Key) (err error) {
 	if key.KeyType() != a.ktype {
 		return ErrKeyTypeNotMatch
 	}
@@ -178,7 +179,7 @@ func (a *accessor) Delete(key key.Key) (err error) {
 	return a.ldb.Delete(key.Bytes(), &opt.WriteOptions{Sync: a.syncWrites})
 }
 
-func (a *accessor) Query(q dsq.Query) (dsq.Results, error) {
+func (a *accessor) Query(ctx context.Context, q dsq.Query) (dsq.Results, error) {
 	a.closeLk.RLock()
 	defer a.closeLk.RUnlock()
 
@@ -276,7 +277,7 @@ func (a *accessor) Query(q dsq.Query) (dsq.Results, error) {
 
 // DiskUsage returns the current disk size used by this levelDB.
 // For in-mem datastores, it will return 0.
-func (d *Datastore) DiskUsage() (uint64, error) {
+func (d *Datastore) DiskUsage(ctx context.Context) (uint64, error) {
 	d.closeLk.RLock()
 	defer d.closeLk.RUnlock()
 	if d.path == "" { // in-mem
@@ -315,7 +316,7 @@ type leveldbBatch struct {
 	ktype      key.KeyType
 }
 
-func (d *Datastore) Batch() (ds.Batch, error) {
+func (d *Datastore) Batch(ctx context.Context) (ds.Batch, error) {
 	return &leveldbBatch{
 		b:          new(leveldb.Batch),
 		db:         d.DB,
@@ -325,7 +326,7 @@ func (d *Datastore) Batch() (ds.Batch, error) {
 	}, nil
 }
 
-func (b *leveldbBatch) Put(key key.Key, value []byte) error {
+func (b *leveldbBatch) Put(ctx context.Context, key key.Key, value []byte) error {
 	if key.KeyType() != b.ktype {
 		return ErrKeyTypeNotMatch
 	}
@@ -333,13 +334,13 @@ func (b *leveldbBatch) Put(key key.Key, value []byte) error {
 	return nil
 }
 
-func (b *leveldbBatch) Commit() error {
+func (b *leveldbBatch) Commit(ctx context.Context) error {
 	b.closeLk.RLock()
 	defer b.closeLk.RUnlock()
 	return b.db.Write(b.b, &opt.WriteOptions{Sync: b.syncWrites})
 }
 
-func (b *leveldbBatch) Delete(key key.Key) error {
+func (b *leveldbBatch) Delete(ctx context.Context, key key.Key) error {
 	if key.KeyType() != b.ktype {
 		return ErrKeyTypeNotMatch
 	}
@@ -353,19 +354,19 @@ type transaction struct {
 	tx *leveldb.Transaction
 }
 
-func (t *transaction) Commit() error {
+func (t *transaction) Commit(ctx context.Context) error {
 	t.closeLk.RLock()
 	defer t.closeLk.RUnlock()
 	return t.tx.Commit()
 }
 
-func (t *transaction) Discard() {
+func (t *transaction) Discard(ctx context.Context) {
 	t.closeLk.RLock()
 	defer t.closeLk.RUnlock()
 	t.tx.Discard()
 }
 
-func (d *Datastore) NewTransaction(readOnly bool) (ds.Txn, error) {
+func (d *Datastore) NewTransaction(ctx context.Context, readOnly bool) (ds.Txn, error) {
 	d.closeLk.RLock()
 	defer d.closeLk.RUnlock()
 	tx, err := d.DB.OpenTransaction()
